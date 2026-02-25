@@ -54,19 +54,17 @@ def generate_btc_arena(current_price: float):
 # -----------------------------
 
 def send_test_tweet():
-    auth = tweepy.OAuth1UserHandler(
-        os.environ["X_API_KEY"],
-        os.environ["X_API_SECRET"],
-        os.environ["X_ACCESS_TOKEN"],
-        os.environ["X_ACCESS_SECRET"],
+    client = tweepy.Client(
+        consumer_key=os.environ["X_API_KEY"],
+        consumer_secret=os.environ["X_API_SECRET"],
+        access_token=os.environ["X_ACCESS_TOKEN"],
+        access_token_secret=os.environ["X_ACCESS_SECRET"],
     )
-
-    api = tweepy.API(auth)
 
     tweet = "sylon online. prediction arenas coming soon."
 
-    api.update_status(tweet)
-    print("test tweet sent")
+    client.create_tweet(text=tweet)
+    print("test tweet sent (v2)")
 
 # -----------------------------
 # MAIN (TEMPORARY TEST MODE)
