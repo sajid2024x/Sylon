@@ -52,7 +52,6 @@ def generate_btc_arena(current_price: float):
 # -----------------------------
 
 if __name__ == "__main__":
-    global arenas_created_today, current_day
 
     while True:
         now = datetime.now(timezone.utc)
