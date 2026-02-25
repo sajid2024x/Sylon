@@ -193,7 +193,7 @@ def save_arena(arena):
 def save_prediction(arena_id, username, prediction):
     prediction = prediction.upper()
     if prediction not in ("YES", "NO"):
-        print("Invalid prediction.")
+        print("Invalid prediction. Use YES or NO.")
         return
 
     conn = get_db()
@@ -202,26 +202,53 @@ def save_prediction(arena_id, username, prediction):
         cur.execute("""
             INSERT INTO predictions (arena_id, username, prediction, created_at)
             VALUES (?, ?, ?, ?)
-        """, (arena_id, username.lower(), prediction, datetime.now(timezone.utc).isoformat()))
+        """, (
+            arena_id,
+            username.lower(),
+            prediction,
+            datetime.now(timezone.utc).isoformat()
+        ))
         conn.commit()
         print(f"Recorded: @{username} → {prediction}")
     except sqlite3.IntegrityError:
-        print("Already predicted.")
+        print("User already predicted on this arena.")
     conn.close()
 
 # =================================================
-# FORMATTERS (X-READY)
+# LEADERBOARD (X STYLE)
 # =================================================
 
-def format_arena(arena):
-    return (
-        "🧠 SYLON PREDICTION ARENA\n\n"
-        f"Arena ID: {arena['arena_id']}\n\n"
-        f"{arena['question']}\n\n"
-        f"Deadline: {arena['deadline'].strftime('%Y-%m-%d %H:%M')} UTC\n\n"
-        "Reply YES or NO 👇\n\n"
-        f"{arena['rules']}"
-    )
+def format_leaderboard_reply(limit=5):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            username,
+            wins,
+            losses,
+            ROUND((wins * 100.0) / total_predictions, 2) AS accuracy,
+            current_streak
+        FROM user_stats
+        WHERE total_predictions > 0
+        ORDER BY accuracy DESC, wins DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = cur.fetchall()
+    conn.close()
+
+    if not rows:
+        return "🏆 SYLON LEADERBOARD\n\nNo predictions yet."
+
+    text = "🏆 SYLON LEADERBOARD\n\n"
+    for i, r in enumerate(rows, start=1):
+        username, wins, losses, acc, streak = r
+        streak_txt = f" | 🔥{streak}" if streak > 1 else ""
+        text += f"{i}. @{username} — {acc}% | W:{wins} L:{losses}{streak_txt}\n"
+
+    text += "\nreputation compounds."
+    return text
 
 # =================================================
 # CLI HANDLER
@@ -253,13 +280,17 @@ def handle_command(cmd):
         arena = generate_macro_arena_from_narrative(arena_type, num)
         save_arena(arena)
         print("\n--- READY TO POST ---")
-        print(format_arena(arena))
+        print(arena["question"])
         print("--- END ---\n")
+
+    elif parts[0].lower() in ("leaderboard", "lb", "rank"):
+        print(format_leaderboard_reply())
 
     else:
         print("Commands:")
         print("  predict <ARENA_ID> <username> YES/NO")
         print("  narrative <text>")
+        print("  leaderboard")
 
 # =================================================
 # MAIN LOOP
@@ -267,7 +298,7 @@ def handle_command(cmd):
 
 if __name__ == "__main__":
     init_db()
-    print("\nSylon running (Full V1).\n")
+    print("\nSylon running (X-Native Leaderboard V1).\n")
 
     while True:
         try:
