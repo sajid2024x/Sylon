@@ -1,7 +1,5 @@
 import time
 import random
-import os
-import tweepy
 from datetime import datetime, timedelta, timezone
 
 # -----------------------------
@@ -12,7 +10,7 @@ DAILY_ARENA_LIMIT = 3
 CRYPTO_PRICE_LEVELS = [88000, 90000, 92000, 95000]
 
 # -----------------------------
-# STATE (in-memory for v1)
+# STATE (in-memory v1)
 # -----------------------------
 
 arenas_created_today = 0
@@ -22,9 +20,8 @@ current_day = datetime.now(timezone.utc).date()
 # ARENA GENERATOR
 # -----------------------------
 
-def generate_btc_arena(current_price: float):
+def generate_btc_arena():
     target = random.choice(CRYPTO_PRICE_LEVELS)
-
     deadline = datetime.now(timezone.utc) + timedelta(days=3)
 
     question = (
@@ -33,42 +30,60 @@ def generate_btc_arena(current_price: float):
     )
 
     rules = (
-        "resolution rule: arena resolves YES if btc last traded "
-        "price on binance reaches or exceeds the target before deadline."
+        "resolution rule: YES if btc last traded price on binance "
+        "reaches or exceeds target before deadline."
     )
 
-    arena = {
-        "asset": "BTC",
+    return {
         "question": question,
-        "target_price": target,
-        "deadline": deadline.isoformat(),
+        "deadline": deadline,
         "rules": rules,
-        "type": "price",
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "type": "crypto_price",
+        "created_at": datetime.now(timezone.utc)
     }
 
-    return arena
-
 # -----------------------------
-# X TEST TWEET
+# TWEET FORMATTER (MANUAL MODE)
 # -----------------------------
 
-def send_test_tweet():
-    client = tweepy.Client(
-        consumer_key=os.environ["X_API_KEY"],
-        consumer_secret=os.environ["X_API_SECRET"],
-        access_token=os.environ["X_ACCESS_TOKEN"],
-        access_token_secret=os.environ["X_ACCESS_SECRET"],
+def format_arena_tweet(arena):
+    tweet = (
+        "🧠 SYLON PREDICTION ARENA\n\n"
+        f"{arena['question']}\n\n"
+        f"deadline: {arena['deadline'].strftime('%Y-%m-%d %H:%M')} utc\n\n"
+        "reply YES or NO 👇\n\n"
+        f"{arena['rules']}"
     )
-
-    tweet = "sylon online. prediction arenas coming soon."
-
-    client.create_tweet(text=tweet)
-    print("test tweet sent (v2)")
+    return tweet
 
 # -----------------------------
-# MAIN (TEMPORARY TEST MODE)
+# MAIN LOOP
 # -----------------------------
 
 if __name__ == "__main__":
-    send_test_tweet()
+
+    while True:
+        now = datetime.now(timezone.utc)
+        today = now.date()
+
+        # reset daily counter
+        if today != current_day:
+            arenas_created_today = 0
+            current_day = today
+            print(f"\nnew utc day started: {current_day}\n")
+
+        if arenas_created_today < DAILY_ARENA_LIMIT:
+            arena = generate_btc_arena()
+            tweet_text = format_arena_tweet(arena)
+
+            arenas_created_today += 1
+
+            print("\n--- READY TO POST ON X ---")
+            print(tweet_text)
+            print("--- END ---\n")
+
+        else:
+            print("daily arena limit reached")
+
+        # wait 24 hours
+        time.sleep(86400)
