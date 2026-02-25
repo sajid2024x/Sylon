@@ -27,7 +27,6 @@ def init_db():
     conn = get_db()
     cur = conn.cursor()
 
-    # arenas
     cur.execute("""
         CREATE TABLE IF NOT EXISTS arenas (
             arena_id TEXT PRIMARY KEY,
@@ -45,7 +44,6 @@ def init_db():
         )
     """)
 
-    # predictions
     cur.execute("""
         CREATE TABLE IF NOT EXISTS predictions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +55,6 @@ def init_db():
         )
     """)
 
-    # user stats
     cur.execute("""
         CREATE TABLE IF NOT EXISTS user_stats (
             username TEXT PRIMARY KEY,
@@ -137,10 +134,16 @@ def save_arena(arena):
         INSERT OR REPLACE INTO arenas
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        arena["arena_id"], arena["type"], arena["question"],
-        arena["target"], arena["floor"],
-        arena["deadline"].isoformat(), arena["rules"],
-        arena["status"], arena["outcome"], arena["resolved_price"],
+        arena["arena_id"],
+        arena["type"],
+        arena["question"],
+        arena["target"],
+        arena["floor"],
+        arena["deadline"].isoformat(),
+        arena["rules"],
+        arena["status"],
+        arena["outcome"],
+        arena["resolved_price"],
         arena["created_at"].isoformat(),
         arena["resolved_at"].isoformat() if arena["resolved_at"] else None
     ))
@@ -150,17 +153,27 @@ def save_arena(arena):
 def save_prediction(arena_id, username, prediction):
     prediction = prediction.upper()
     if prediction not in ("YES", "NO"):
+        print("Invalid prediction. Use YES or NO.")
         return
 
     conn = get_db()
     cur = conn.cursor()
+
     try:
         cur.execute("""
-            INSERT INTO predictions VALUES (NULL, ?, ?, ?, ?)
-        """, (arena_id, username.lower(), prediction, datetime.now(timezone.utc).isoformat()))
+            INSERT INTO predictions (arena_id, username, prediction, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (
+            arena_id,
+            username.lower(),
+            prediction,
+            datetime.now(timezone.utc).isoformat()
+        ))
         conn.commit()
+        print(f"Prediction recorded: {username} → {prediction}")
     except sqlite3.IntegrityError:
-        pass
+        print("User already predicted on this arena.")
+
     conn.close()
 
 def load_open_arenas():
@@ -186,6 +199,7 @@ def load_open_arenas():
             "created_at": datetime.fromisoformat(r[10]),
             "resolved_at": datetime.fromisoformat(r[11]) if r[11] else None
         })
+
     return arenas
 
 # -----------------------------
@@ -196,12 +210,12 @@ def update_user_stats(arena):
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT username, prediction FROM predictions WHERE arena_id=?
-    """, (arena["arena_id"],))
-    rows = cur.fetchall()
+    cur.execute(
+        "SELECT username, prediction FROM predictions WHERE arena_id=?",
+        (arena["arena_id"],)
+    )
 
-    for username, prediction in rows:
+    for username, prediction in cur.fetchall():
         correct = prediction == arena["outcome"]
 
         cur.execute("SELECT * FROM user_stats WHERE username=?", (username,))
@@ -214,7 +228,7 @@ def update_user_stats(arena):
             streak = 1 if correct else 0
             max_streak = streak
         else:
-            total, wins, losses, streak, max_streak = row[1:]
+            _, total, wins, losses, streak, max_streak = row
             total += 1
             if correct:
                 wins += 1
@@ -254,6 +268,20 @@ def resolve_arena(arena):
     return arena
 
 # -----------------------------
+# CLI COMMAND HANDLER
+# -----------------------------
+
+def handle_command(command: str):
+    parts = command.strip().split()
+
+    if len(parts) != 4 or parts[0].lower() != "predict":
+        print("Use: predict <ARENA_ID> <username> YES/NO")
+        return
+
+    _, arena_id, username, prediction = parts
+    save_prediction(arena_id, username, prediction)
+
+# -----------------------------
 # MAIN LOOP
 # -----------------------------
 
@@ -262,7 +290,9 @@ if __name__ == "__main__":
     init_db()
     active_arenas = load_open_arenas()
 
-    print("Sylon running. Manual predictions via save_prediction().")
+    print("\nSylon running.")
+    print("Enter predictions like:")
+    print("predict SYLON-YYYYMMDD-001 alice YES\n")
 
     while True:
         now = datetime.now(timezone.utc)
@@ -270,7 +300,10 @@ if __name__ == "__main__":
 
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM arenas WHERE arena_id LIKE ?", (f"SYLON-{today}-%",))
+        cur.execute(
+            "SELECT COUNT(*) FROM arenas WHERE arena_id LIKE ?",
+            (f"SYLON-{today}-%",)
+        )
         count = cur.fetchone()[0]
         conn.close()
 
@@ -286,5 +319,12 @@ if __name__ == "__main__":
                 resolved = resolve_arena(arena)
                 active_arenas.remove(arena)
                 print("RESOLVED:", resolved["arena_id"], resolved["outcome"])
+
+        try:
+            user_input = input(">> ").strip()
+            if user_input:
+                handle_command(user_input)
+        except EOFError:
+            pass
 
         time.sleep(3600)
