@@ -14,21 +14,6 @@ BTC_PRICE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
 HIT_LEVELS = [88000, 90000, 92000, 95000]
 FLOOR_LEVELS = [82000, 85000, 88000]
 
-MACRO_TEMPLATES = [
-    {
-        "question": "Will the Federal Reserve announce an emergency policy action before {deadline} UTC?",
-        "resolver": "FED_ANNOUNCEMENT"
-    },
-    {
-        "question": "Will the U.S. government announce a shutdown before {deadline} UTC?",
-        "resolver": "US_SHUTDOWN"
-    },
-    {
-        "question": "Will a new U.S. economic sanctions package be announced before {deadline} UTC?",
-        "resolver": "SANCTIONS"
-    }
-]
-
 DB_PATH = "arenas.db"
 
 # -----------------------------
@@ -89,8 +74,7 @@ def init_db():
 # -----------------------------
 
 def get_btc_price():
-    r = requests.get(BTC_PRICE_URL, timeout=10)
-    return float(r.json()["price"])
+    return float(requests.get(BTC_PRICE_URL, timeout=10).json()["price"])
 
 # -----------------------------
 # ARENA GENERATORS
@@ -100,11 +84,9 @@ def generate_hit_target_arena(num):
     now = datetime.now(timezone.utc)
     target = random.choice(HIT_LEVELS)
     deadline = now + timedelta(days=3)
-    arena_id = f"SYLON-{now.strftime('%Y%m%d')}-{num:03d}"
-
     return {
-        "arena_id": arena_id,
-        "type": "HIT_TARGET",
+        "arena_id": f"SYLON-{now.strftime('%Y%m%d')}-{num:03d}",
+        "type": "CRYPTO",
         "question": f"Will BTC hit {target} USD before {deadline.strftime('%Y-%m-%d %H:%M')} UTC?",
         "target": target,
         "floor": None,
@@ -121,11 +103,9 @@ def generate_stay_above_arena(num):
     now = datetime.now(timezone.utc)
     floor = random.choice(FLOOR_LEVELS)
     deadline = now + timedelta(days=2)
-    arena_id = f"SYLON-{now.strftime('%Y%m%d')}-{num:03d}"
-
     return {
-        "arena_id": arena_id,
-        "type": "STAY_ABOVE",
+        "arena_id": f"SYLON-{now.strftime('%Y%m%d')}-{num:03d}",
+        "type": "CRYPTO",
         "question": f"Will BTC stay above {floor} USD until {deadline.strftime('%Y-%m-%d %H:%M')} UTC?",
         "target": None,
         "floor": floor,
@@ -140,21 +120,15 @@ def generate_stay_above_arena(num):
 
 def generate_macro_arena(num):
     now = datetime.now(timezone.utc)
-    template = random.choice(MACRO_TEMPLATES)
     deadline = now + timedelta(days=2)
-
-    arena_id = f"SYLON-{now.strftime('%Y%m%d')}-{num:03d}"
-
     return {
-        "arena_id": arena_id,
+        "arena_id": f"SYLON-{now.strftime('%Y%m%d')}-{num:03d}",
         "type": "MACRO",
-        "question": template["question"].format(
-            deadline=deadline.strftime('%Y-%m-%d %H:%M')
-        ),
+        "question": f"Will a major U.S. government economic announcement occur before {deadline.strftime('%Y-%m-%d %H:%M')} UTC?",
         "target": None,
         "floor": None,
         "deadline": deadline,
-        "rules": "YES if confirmed by official government or institutional announcement.",
+        "rules": "YES if confirmed by official government announcement.",
         "status": "OPEN",
         "outcome": None,
         "resolved_price": None,
@@ -170,86 +144,114 @@ def save_arena(arena):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        INSERT OR REPLACE INTO arenas
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO arenas VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        arena["arena_id"],
-        arena["type"],
-        arena["question"],
-        arena["target"],
-        arena["floor"],
-        arena["deadline"].isoformat(),
-        arena["rules"],
-        arena["status"],
-        arena["outcome"],
-        arena["resolved_price"],
-        arena["created_at"].isoformat(),
+        arena["arena_id"], arena["type"], arena["question"],
+        arena["target"], arena["floor"], arena["deadline"].isoformat(),
+        arena["rules"], arena["status"], arena["outcome"],
+        arena["resolved_price"], arena["created_at"].isoformat(),
         arena["resolved_at"].isoformat() if arena["resolved_at"] else None
     ))
     conn.commit()
     conn.close()
 
+def get_arena(arena_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM arenas WHERE arena_id=?", (arena_id,))
+    r = cur.fetchone()
+    conn.close()
+    if not r:
+        return None
+    return {
+        "arena_id": r[0],
+        "type": r[1],
+        "question": r[2],
+        "target": r[3],
+        "floor": r[4],
+        "deadline": datetime.fromisoformat(r[5]),
+        "rules": r[6],
+        "status": r[7],
+        "outcome": r[8],
+        "resolved_price": r[9],
+        "created_at": datetime.fromisoformat(r[10]),
+        "resolved_at": datetime.fromisoformat(r[11]) if r[11] else None
+    }
+
 # -----------------------------
-# RESOLUTION ENGINE (MACRO = MANUAL)
+# FORMATTERS (X READY)
 # -----------------------------
 
-def resolve_arena(arena):
-    if arena["type"] in ("HIT_TARGET", "STAY_ABOVE"):
-        price = get_btc_price()
-        if arena["type"] == "HIT_TARGET":
-            outcome = "YES" if price >= arena["target"] else "NO"
-        else:
-            outcome = "YES" if price >= arena["floor"] else "NO"
-        arena["resolved_price"] = price
+def format_arena_post(arena):
+    return (
+        "🧠 SYLON PREDICTION ARENA\n\n"
+        f"Arena ID: {arena['arena_id']}\n\n"
+        f"{arena['question']}\n\n"
+        f"Deadline: {arena['deadline'].strftime('%Y-%m-%d %H:%M')} UTC\n\n"
+        "Reply YES or NO 👇\n\n"
+        f"{arena['rules']}"
+    )
+
+def format_resolution_post(arena):
+    return (
+        "🧠 SYLON ARENA RESOLVED\n\n"
+        f"Arena ID: {arena['arena_id']}\n\n"
+        f"Outcome: {arena['outcome']}\n"
+        f"Resolved Price: {arena['resolved_price']}\n\n"
+        f"{arena['question']}"
+    )
+
+def format_leaderboard():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT username, wins, losses,
+               ROUND((wins * 100.0) / total_predictions, 2) acc,
+               current_streak
+        FROM user_stats
+        ORDER BY acc DESC, wins DESC
+        LIMIT 5
+    """)
+    rows = cur.fetchall()
+    conn.close()
+
+    text = "🏆 SYLON LEADERBOARD\n\n"
+    for i, r in enumerate(rows, 1):
+        text += f"{i}. @{r[0]} — {r[3]}% | W:{r[1]} L:{r[2]} | Streak:{r[4]}\n"
+    return text
+
+# -----------------------------
+# CLI COMMANDS
+# -----------------------------
+
+def handle_command(cmd):
+    p = cmd.split()
+    if not p:
+        return
+    if p[0] == "post" and p[1] == "arena":
+        print(format_arena_post(get_arena(p[2])))
+    elif p[0] == "post" and p[1] == "resolution":
+        print(format_resolution_post(get_arena(p[2])))
+    elif p[0] == "post" and p[1] == "leaderboard":
+        print(format_leaderboard())
     else:
-        # macro v1 = manual resolution
-        outcome = "NO"
-
-    arena["status"] = "RESOLVED"
-    arena["outcome"] = outcome
-    arena["resolved_at"] = datetime.now(timezone.utc)
-
-    save_arena(arena)
-    return arena
+        print("Commands:")
+        print("post arena <ARENA_ID>")
+        print("post resolution <ARENA_ID>")
+        print("post leaderboard")
 
 # -----------------------------
-# MAIN LOOP (3 arenas/day)
+# MAIN LOOP
 # -----------------------------
 
 if __name__ == "__main__":
-
     init_db()
-
-    print("\nSylon running with Crypto + Macro arenas.\n")
-
+    print("\nSylon running (Share Mode Ready).\n")
     while True:
-        now = datetime.now(timezone.utc)
-        today = now.strftime("%Y%m%d")
-
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT COUNT(*) FROM arenas WHERE arena_id LIKE ?",
-            (f"SYLON-{today}-%",)
-        )
-        count = cur.fetchone()[0]
-        conn.close()
-
-        if count < DAILY_ARENA_LIMIT:
-            num = count + 1
-
-            if num == 3:
-                arena = generate_macro_arena(num)
-            elif num % 2 == 1:
-                arena = generate_hit_target_arena(num)
-            else:
-                arena = generate_stay_above_arena(num)
-
-            save_arena(arena)
-
-            print("\n--- READY TO POST ON X ---")
-            print(arena["arena_id"])
-            print(arena["question"])
-            print("--- END ---\n")
-
-        time.sleep(3600)
+        try:
+            cmd = input(">> ").strip()
+            if cmd:
+                handle_command(cmd)
+        except EOFError:
+            pass
+        time.sleep(1)
