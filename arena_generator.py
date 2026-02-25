@@ -44,6 +44,17 @@ def init_db():
         )
     """)
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            arena_id TEXT,
+            username TEXT,
+            prediction TEXT,
+            created_at TEXT,
+            UNIQUE(arena_id, username)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -109,7 +120,6 @@ def generate_stay_above_arena(arena_number_today: int):
 def save_arena(arena):
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute("""
         INSERT OR REPLACE INTO arenas
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -127,14 +137,38 @@ def save_arena(arena):
         arena["created_at"].isoformat(),
         arena["resolved_at"].isoformat() if arena["resolved_at"] else None
     ))
-
     conn.commit()
+    conn.close()
+
+def save_prediction(arena_id: str, username: str, prediction: str):
+    prediction = prediction.upper()
+    if prediction not in ("YES", "NO"):
+        print("Invalid prediction. Use YES or NO.")
+        return
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            INSERT INTO predictions (arena_id, username, prediction, created_at)
+            VALUES (?, ?, ?, ?)
+        """, (
+            arena_id,
+            username.lower(),
+            prediction,
+            datetime.now(timezone.utc).isoformat()
+        ))
+        conn.commit()
+        print(f"Prediction recorded: {username} → {prediction}")
+    except sqlite3.IntegrityError:
+        print("User already predicted on this arena.")
+
     conn.close()
 
 def load_open_arenas():
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute("SELECT * FROM arenas WHERE status = 'OPEN'")
     rows = cur.fetchall()
     conn.close()
@@ -157,29 +191,6 @@ def load_open_arenas():
         })
 
     return arenas
-
-# -----------------------------
-# FORMATTERS
-# -----------------------------
-
-def format_arena(arena):
-    return (
-        "🧠 SYLON PREDICTION ARENA\n\n"
-        f"Arena ID: {arena['arena_id']}\n\n"
-        f"{arena['question']}\n\n"
-        f"Deadline: {arena['deadline'].strftime('%Y-%m-%d %H:%M')} UTC\n\n"
-        "Reply YES or NO 👇\n\n"
-        f"Resolution Rule: {arena['rules']}"
-    )
-
-def format_resolution(arena):
-    return (
-        "🧠 SYLON ARENA RESOLVED\n\n"
-        f"Arena ID: {arena['arena_id']}\n\n"
-        f"Outcome: {arena['outcome']}\n"
-        f"BTC Price: {arena['resolved_price']} USD\n\n"
-        f"{arena['question']}"
-    )
 
 # -----------------------------
 # RESOLUTION ENGINE
@@ -210,6 +221,9 @@ if __name__ == "__main__":
     init_db()
     active_arenas = load_open_arenas()
 
+    print("\nSylon is running.")
+    print("Use save_prediction(arena_id, username, YES/NO) manually.\n")
+
     while True:
         now = datetime.now(timezone.utc)
         today = now.strftime("%Y%m%d")
@@ -222,18 +236,12 @@ if __name__ == "__main__":
 
         if arenas_today < DAILY_ARENA_LIMIT:
             arena_number = arenas_today + 1
-
-            arena = (
-                generate_hit_target_arena(arena_number)
-                if arena_number % 2 == 1
-                else generate_stay_above_arena(arena_number)
-            )
-
+            arena = generate_hit_target_arena(arena_number) if arena_number % 2 == 1 else generate_stay_above_arena(arena_number)
             save_arena(arena)
             active_arenas.append(arena)
 
             print("\n--- READY TO POST ON X ---")
-            print(format_arena(arena))
+            print(arena["arena_id"], "-", arena["question"])
             print("--- END ---\n")
 
         for arena in list(active_arenas):
@@ -242,7 +250,7 @@ if __name__ == "__main__":
                 active_arenas.remove(arena)
 
                 print("\n--- ARENA RESOLVED ---")
-                print(format_resolution(resolved))
+                print(resolved["arena_id"], "→", resolved["outcome"])
                 print("--- END ---\n")
 
         time.sleep(3600)
