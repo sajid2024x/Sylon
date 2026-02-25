@@ -158,22 +158,15 @@ def save_prediction(arena_id, username, prediction):
 
     conn = get_db()
     cur = conn.cursor()
-
     try:
         cur.execute("""
             INSERT INTO predictions (arena_id, username, prediction, created_at)
             VALUES (?, ?, ?, ?)
-        """, (
-            arena_id,
-            username.lower(),
-            prediction,
-            datetime.now(timezone.utc).isoformat()
-        ))
+        """, (arena_id, username.lower(), prediction, datetime.now(timezone.utc).isoformat()))
         conn.commit()
         print(f"Prediction recorded: {username} → {prediction}")
     except sqlite3.IntegrityError:
         print("User already predicted on this arena.")
-
     conn.close()
 
 def load_open_arenas():
@@ -199,7 +192,6 @@ def load_open_arenas():
             "created_at": datetime.fromisoformat(r[10]),
             "resolved_at": datetime.fromisoformat(r[11]) if r[11] else None
         })
-
     return arenas
 
 # -----------------------------
@@ -210,12 +202,10 @@ def update_user_stats(arena):
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute(
-        "SELECT username, prediction FROM predictions WHERE arena_id=?",
-        (arena["arena_id"],)
-    )
+    cur.execute("SELECT username, prediction FROM predictions WHERE arena_id=?", (arena["arena_id"],))
+    rows = cur.fetchall()
 
-    for username, prediction in cur.fetchall():
+    for username, prediction in rows:
         correct = prediction == arena["outcome"]
 
         cur.execute("SELECT * FROM user_stats WHERE username=?", (username,))
@@ -246,6 +236,39 @@ def update_user_stats(arena):
     conn.commit()
     conn.close()
 
+def print_leaderboard(limit=10):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            username,
+            total_predictions,
+            wins,
+            losses,
+            ROUND((wins * 100.0) / total_predictions, 2) AS accuracy,
+            current_streak,
+            max_streak
+        FROM user_stats
+        WHERE total_predictions >= 1
+        ORDER BY accuracy DESC, wins DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = cur.fetchall()
+    conn.close()
+
+    print("\n🏆 SYLON LEADERBOARD\n")
+    for i, row in enumerate(rows, start=1):
+        username, total, wins, losses, acc, streak, max_streak = row
+        print(
+            f"{i}. @{username} | "
+            f"{acc}% | "
+            f"W:{wins} L:{losses} | "
+            f"Streak:{streak}"
+        )
+    print()
+
 # -----------------------------
 # RESOLUTION ENGINE
 # -----------------------------
@@ -274,12 +297,18 @@ def resolve_arena(arena):
 def handle_command(command: str):
     parts = command.strip().split()
 
-    if len(parts) != 4 or parts[0].lower() != "predict":
-        print("Use: predict <ARENA_ID> <username> YES/NO")
+    if not parts:
         return
 
-    _, arena_id, username, prediction = parts
-    save_prediction(arena_id, username, prediction)
+    if parts[0].lower() == "predict" and len(parts) == 4:
+        _, arena_id, username, prediction = parts
+        save_prediction(arena_id, username, prediction)
+    elif parts[0].lower() == "leaderboard":
+        print_leaderboard()
+    else:
+        print("Commands:")
+        print("  predict <ARENA_ID> <username> YES/NO")
+        print("  leaderboard")
 
 # -----------------------------
 # MAIN LOOP
@@ -291,8 +320,9 @@ if __name__ == "__main__":
     active_arenas = load_open_arenas()
 
     print("\nSylon running.")
-    print("Enter predictions like:")
-    print("predict SYLON-YYYYMMDD-001 alice YES\n")
+    print("Commands:")
+    print("  predict <ARENA_ID> <username> YES/NO")
+    print("  leaderboard\n")
 
     while True:
         now = datetime.now(timezone.utc)
@@ -300,10 +330,7 @@ if __name__ == "__main__":
 
         conn = get_db()
         cur = conn.cursor()
-        cur.execute(
-            "SELECT COUNT(*) FROM arenas WHERE arena_id LIKE ?",
-            (f"SYLON-{today}-%",)
-        )
+        cur.execute("SELECT COUNT(*) FROM arenas WHERE arena_id LIKE ?", (f"SYLON-{today}-%",))
         count = cur.fetchone()[0]
         conn.close()
 
