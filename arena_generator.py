@@ -14,6 +14,21 @@ BTC_PRICE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
 HIT_LEVELS = [88000, 90000, 92000, 95000]
 FLOOR_LEVELS = [82000, 85000, 88000]
 
+MACRO_TEMPLATES = [
+    {
+        "question": "Will the Federal Reserve announce an emergency policy action before {deadline} UTC?",
+        "resolver": "FED_ANNOUNCEMENT"
+    },
+    {
+        "question": "Will the U.S. government announce a shutdown before {deadline} UTC?",
+        "resolver": "US_SHUTDOWN"
+    },
+    {
+        "question": "Will a new U.S. economic sanctions package be announced before {deadline} UTC?",
+        "resolver": "SANCTIONS"
+    }
+]
+
 DB_PATH = "arenas.db"
 
 # -----------------------------
@@ -123,6 +138,30 @@ def generate_stay_above_arena(num):
         "resolved_at": None
     }
 
+def generate_macro_arena(num):
+    now = datetime.now(timezone.utc)
+    template = random.choice(MACRO_TEMPLATES)
+    deadline = now + timedelta(days=2)
+
+    arena_id = f"SYLON-{now.strftime('%Y%m%d')}-{num:03d}"
+
+    return {
+        "arena_id": arena_id,
+        "type": "MACRO",
+        "question": template["question"].format(
+            deadline=deadline.strftime('%Y-%m-%d %H:%M')
+        ),
+        "target": None,
+        "floor": None,
+        "deadline": deadline,
+        "rules": "YES if confirmed by official government or institutional announcement.",
+        "status": "OPEN",
+        "outcome": None,
+        "resolved_price": None,
+        "created_at": now,
+        "resolved_at": None
+    }
+
 # -----------------------------
 # DATABASE HELPERS
 # -----------------------------
@@ -150,179 +189,38 @@ def save_arena(arena):
     conn.commit()
     conn.close()
 
-def save_prediction(arena_id, username, prediction):
-    prediction = prediction.upper()
-    if prediction not in ("YES", "NO"):
-        print("Invalid prediction. Use YES or NO.")
-        return
-
-    conn = get_db()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            INSERT INTO predictions (arena_id, username, prediction, created_at)
-            VALUES (?, ?, ?, ?)
-        """, (arena_id, username.lower(), prediction, datetime.now(timezone.utc).isoformat()))
-        conn.commit()
-        print(f"Prediction recorded: {username} → {prediction}")
-    except sqlite3.IntegrityError:
-        print("User already predicted on this arena.")
-    conn.close()
-
-def load_open_arenas():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM arenas WHERE status='OPEN'")
-    rows = cur.fetchall()
-    conn.close()
-
-    arenas = []
-    for r in rows:
-        arenas.append({
-            "arena_id": r[0],
-            "type": r[1],
-            "question": r[2],
-            "target": r[3],
-            "floor": r[4],
-            "deadline": datetime.fromisoformat(r[5]),
-            "rules": r[6],
-            "status": r[7],
-            "outcome": r[8],
-            "resolved_price": r[9],
-            "created_at": datetime.fromisoformat(r[10]),
-            "resolved_at": datetime.fromisoformat(r[11]) if r[11] else None
-        })
-    return arenas
-
 # -----------------------------
-# LEADERBOARD LOGIC
-# -----------------------------
-
-def update_user_stats(arena):
-    conn = get_db()
-    cur = conn.cursor()
-
-    cur.execute("SELECT username, prediction FROM predictions WHERE arena_id=?", (arena["arena_id"],))
-    rows = cur.fetchall()
-
-    for username, prediction in rows:
-        correct = prediction == arena["outcome"]
-
-        cur.execute("SELECT * FROM user_stats WHERE username=?", (username,))
-        row = cur.fetchone()
-
-        if not row:
-            total = 1
-            wins = 1 if correct else 0
-            losses = 0 if correct else 1
-            streak = 1 if correct else 0
-            max_streak = streak
-        else:
-            _, total, wins, losses, streak, max_streak = row
-            total += 1
-            if correct:
-                wins += 1
-                streak += 1
-                max_streak = max(max_streak, streak)
-            else:
-                losses += 1
-                streak = 0
-
-        cur.execute("""
-            INSERT OR REPLACE INTO user_stats
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (username, total, wins, losses, streak, max_streak))
-
-    conn.commit()
-    conn.close()
-
-def print_leaderboard(limit=10):
-    conn = get_db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT
-            username,
-            total_predictions,
-            wins,
-            losses,
-            ROUND((wins * 100.0) / total_predictions, 2) AS accuracy,
-            current_streak,
-            max_streak
-        FROM user_stats
-        WHERE total_predictions >= 1
-        ORDER BY accuracy DESC, wins DESC
-        LIMIT ?
-    """, (limit,))
-
-    rows = cur.fetchall()
-    conn.close()
-
-    print("\n🏆 SYLON LEADERBOARD\n")
-    for i, row in enumerate(rows, start=1):
-        username, total, wins, losses, acc, streak, max_streak = row
-        print(
-            f"{i}. @{username} | "
-            f"{acc}% | "
-            f"W:{wins} L:{losses} | "
-            f"Streak:{streak}"
-        )
-    print()
-
-# -----------------------------
-# RESOLUTION ENGINE
+# RESOLUTION ENGINE (MACRO = MANUAL)
 # -----------------------------
 
 def resolve_arena(arena):
-    price = get_btc_price()
-
-    if arena["type"] == "HIT_TARGET":
-        outcome = "YES" if price >= arena["target"] else "NO"
+    if arena["type"] in ("HIT_TARGET", "STAY_ABOVE"):
+        price = get_btc_price()
+        if arena["type"] == "HIT_TARGET":
+            outcome = "YES" if price >= arena["target"] else "NO"
+        else:
+            outcome = "YES" if price >= arena["floor"] else "NO"
+        arena["resolved_price"] = price
     else:
-        outcome = "YES" if price >= arena["floor"] else "NO"
+        # macro v1 = manual resolution
+        outcome = "NO"
 
     arena["status"] = "RESOLVED"
     arena["outcome"] = outcome
-    arena["resolved_price"] = price
     arena["resolved_at"] = datetime.now(timezone.utc)
 
     save_arena(arena)
-    update_user_stats(arena)
     return arena
 
 # -----------------------------
-# CLI COMMAND HANDLER
-# -----------------------------
-
-def handle_command(command: str):
-    parts = command.strip().split()
-
-    if not parts:
-        return
-
-    if parts[0].lower() == "predict" and len(parts) == 4:
-        _, arena_id, username, prediction = parts
-        save_prediction(arena_id, username, prediction)
-    elif parts[0].lower() == "leaderboard":
-        print_leaderboard()
-    else:
-        print("Commands:")
-        print("  predict <ARENA_ID> <username> YES/NO")
-        print("  leaderboard")
-
-# -----------------------------
-# MAIN LOOP
+# MAIN LOOP (3 arenas/day)
 # -----------------------------
 
 if __name__ == "__main__":
 
     init_db()
-    active_arenas = load_open_arenas()
 
-    print("\nSylon running.")
-    print("Commands:")
-    print("  predict <ARENA_ID> <username> YES/NO")
-    print("  leaderboard\n")
+    print("\nSylon running with Crypto + Macro arenas.\n")
 
     while True:
         now = datetime.now(timezone.utc)
@@ -330,28 +228,28 @@ if __name__ == "__main__":
 
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM arenas WHERE arena_id LIKE ?", (f"SYLON-{today}-%",))
+        cur.execute(
+            "SELECT COUNT(*) FROM arenas WHERE arena_id LIKE ?",
+            (f"SYLON-{today}-%",)
+        )
         count = cur.fetchone()[0]
         conn.close()
 
         if count < DAILY_ARENA_LIMIT:
             num = count + 1
-            arena = generate_hit_target_arena(num) if num % 2 else generate_stay_above_arena(num)
+
+            if num == 3:
+                arena = generate_macro_arena(num)
+            elif num % 2 == 1:
+                arena = generate_hit_target_arena(num)
+            else:
+                arena = generate_stay_above_arena(num)
+
             save_arena(arena)
-            active_arenas.append(arena)
-            print("NEW ARENA:", arena["arena_id"])
 
-        for arena in list(active_arenas):
-            if now >= arena["deadline"]:
-                resolved = resolve_arena(arena)
-                active_arenas.remove(arena)
-                print("RESOLVED:", resolved["arena_id"], resolved["outcome"])
-
-        try:
-            user_input = input(">> ").strip()
-            if user_input:
-                handle_command(user_input)
-        except EOFError:
-            pass
+            print("\n--- READY TO POST ON X ---")
+            print(arena["arena_id"])
+            print(arena["question"])
+            print("--- END ---\n")
 
         time.sleep(3600)
