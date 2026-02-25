@@ -28,6 +28,10 @@ def generate_btc_arena(current_price: float):
     }
 
 
+import time
+
 if __name__ == "__main__":
-    arena = generate_btc_arena(current_price=89000)
-    print(arena)
+    while True:
+        arena = generate_btc_arena(current_price=89000)
+        print(arena)
+        time.sleep(86400)  # wait 24 hours
