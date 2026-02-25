@@ -1,5 +1,7 @@
 import time
 import random
+import os
+import tweepy
 from datetime import datetime, timedelta, timezone
 
 # -----------------------------
