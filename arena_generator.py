@@ -16,7 +16,7 @@ HIT_LEVELS = [88000, 90000, 92000, 95000]
 FLOOR_LEVELS = [82000, 85000, 88000]
 
 # =================================================
-# NARRATIVE DETECTION (V1)
+# NARRATIVE + INTENT DETECTION
 # =================================================
 
 NARRATIVE_TRIGGERS = [
@@ -28,6 +28,17 @@ NARRATIVE_TRIGGERS = [
         "keywords": ["shutdown"],
         "arena_type": "MACRO_US_SHUTDOWN"
     }
+]
+
+LEADERBOARD_KEYWORDS = [
+    "leaderboard",
+    "rank",
+    "ranking",
+    "who is winning",
+    "who's winning",
+    "top predictors",
+    "accuracy",
+    "stats"
 ]
 
 # =================================================
@@ -96,6 +107,10 @@ def detect_narrative(text: str):
         if all(k in text for k in trigger["keywords"]):
             return trigger["arena_type"]
     return None
+
+def is_leaderboard_request(text: str) -> bool:
+    text = text.lower()
+    return any(k in text for k in LEADERBOARD_KEYWORDS)
 
 # =================================================
 # ARENA GENERATORS
@@ -286,11 +301,21 @@ def handle_command(cmd):
     elif parts[0].lower() in ("leaderboard", "lb", "rank"):
         print(format_leaderboard_reply())
 
+    elif parts[0] == "check":
+        text = cmd.replace("check", "", 1).strip()
+        if is_leaderboard_request(text):
+            print("\n--- BOT WOULD REPLY ---")
+            print(format_leaderboard_reply())
+            print("--- END ---\n")
+        else:
+            print("No leaderboard intent detected.")
+
     else:
         print("Commands:")
         print("  predict <ARENA_ID> <username> YES/NO")
         print("  narrative <text>")
         print("  leaderboard")
+        print("  check <text>")
 
 # =================================================
 # MAIN LOOP
@@ -298,7 +323,7 @@ def handle_command(cmd):
 
 if __name__ == "__main__":
     init_db()
-    print("\nSylon running (X-Native Leaderboard V1).\n")
+    print("\nSylon running (X-Native Leaderboard + Intent Detection).\n")
 
     while True:
         try:
