@@ -5,6 +5,13 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 # =================================================
+# SAFETY FLAGS
+# =================================================
+
+ENABLE_X_REPLIES = False  # TURN ON ONLY AFTER X API CREDITS
+BOT_USERNAME = "sylon"   # without @
+
+# =================================================
 # CONFIG
 # =================================================
 
@@ -20,14 +27,8 @@ FLOOR_LEVELS = [82000, 85000, 88000]
 # =================================================
 
 NARRATIVE_TRIGGERS = [
-    {
-        "keywords": ["emergency"],
-        "arena_type": "MACRO_FED_EMERGENCY"
-    },
-    {
-        "keywords": ["shutdown"],
-        "arena_type": "MACRO_US_SHUTDOWN"
-    }
+    {"keywords": ["emergency"], "arena_type": "MACRO_FED_EMERGENCY"},
+    {"keywords": ["shutdown"], "arena_type": "MACRO_US_SHUTDOWN"},
 ]
 
 LEADERBOARD_KEYWORDS = [
@@ -38,8 +39,17 @@ LEADERBOARD_KEYWORDS = [
     "who's winning",
     "top predictors",
     "accuracy",
-    "stats"
+    "stats",
 ]
+
+# =================================================
+# OPTIONAL X CLIENT (SAFE IMPORT)
+# =================================================
+
+try:
+    import tweepy
+except ImportError:
+    tweepy = None
 
 # =================================================
 # DATABASE
@@ -208,7 +218,7 @@ def save_arena(arena):
 def save_prediction(arena_id, username, prediction):
     prediction = prediction.upper()
     if prediction not in ("YES", "NO"):
-        print("Invalid prediction. Use YES or NO.")
+        print("Invalid prediction.")
         return
 
     conn = get_db()
@@ -226,7 +236,7 @@ def save_prediction(arena_id, username, prediction):
         conn.commit()
         print(f"Recorded: @{username} → {prediction}")
     except sqlite3.IntegrityError:
-        print("User already predicted on this arena.")
+        print("User already predicted.")
     conn.close()
 
 # =================================================
@@ -266,6 +276,27 @@ def format_leaderboard_reply(limit=5):
     return text
 
 # =================================================
+# X MENTION PROCESSOR (SAFE)
+# =================================================
+
+def process_x_mentions(client):
+    if not ENABLE_X_REPLIES:
+        return
+
+    me = client.get_user(username=BOT_USERNAME)
+    mentions = client.get_users_mentions(me.data.id, max_results=5)
+
+    if not mentions.data:
+        return
+
+    for tweet in mentions.data:
+        if is_leaderboard_request(tweet.text):
+            client.create_tweet(
+                text=format_leaderboard_reply(),
+                in_reply_to_tweet_id=tweet.id
+            )
+
+# =================================================
 # CLI HANDLER
 # =================================================
 
@@ -302,7 +333,7 @@ def handle_command(cmd):
         print(format_leaderboard_reply())
 
     elif parts[0] == "check":
-        text = cmd.replace("check", "", 1).strip()
+        text = cmd.replace("check", "", 1)
         if is_leaderboard_request(text):
             print("\n--- BOT WOULD REPLY ---")
             print(format_leaderboard_reply())
@@ -323,7 +354,7 @@ def handle_command(cmd):
 
 if __name__ == "__main__":
     init_db()
-    print("\nSylon running (X-Native Leaderboard + Intent Detection).\n")
+    print("\nSylon running (X-Native Leaderboard + Safe Auto-Reply).\n")
 
     while True:
         try:
