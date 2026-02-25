@@ -50,30 +50,27 @@ def generate_btc_arena(current_price: float):
     return arena
 
 # -----------------------------
-# DAILY LOOP (WORKER)
+# X TEST TWEET
+# -----------------------------
+
+def send_test_tweet():
+    auth = tweepy.OAuth1UserHandler(
+        os.environ["X_API_KEY"],
+        os.environ["X_API_SECRET"],
+        os.environ["X_ACCESS_TOKEN"],
+        os.environ["X_ACCESS_SECRET"],
+    )
+
+    api = tweepy.API(auth)
+
+    tweet = "sylon online. prediction arenas coming soon."
+
+    api.update_status(tweet)
+    print("test tweet sent")
+
+# -----------------------------
+# MAIN (TEMPORARY TEST MODE)
 # -----------------------------
 
 if __name__ == "__main__":
-
-    while True:
-        now = datetime.now(timezone.utc)
-        today = now.date()
-
-        # reset counter at new UTC day
-        if today != current_day:
-            arenas_created_today = 0
-            current_day = today
-            print(f"new utc day started: {current_day}")
-
-        # create arena if under daily limit
-        if arenas_created_today < DAILY_ARENA_LIMIT:
-            arena = generate_btc_arena(current_price=89000)
-            arenas_created_today += 1
-
-            print("new arena created:")
-            print(arena)
-        else:
-            print("daily arena limit reached")
-
-        # sleep 24 hours
-        time.sleep(86400)
+    send_test_tweet()
