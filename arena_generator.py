@@ -1,5 +1,6 @@
 import time
 import random
+import requests
 from datetime import datetime, timedelta, timezone
 
 # -----------------------------
@@ -8,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 DAILY_ARENA_LIMIT = 3
 CRYPTO_PRICE_LEVELS = [88000, 90000, 92000, 95000]
+BTC_PRICE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
 
 # -----------------------------
 # STATE (in-memory v1)
@@ -15,7 +17,16 @@ CRYPTO_PRICE_LEVELS = [88000, 90000, 92000, 95000]
 
 arenas_created_today = 0
 current_day = datetime.now(timezone.utc).date()
-active_arenas = []  # arenas waiting to be resolved
+active_arenas = []  # arenas waiting for resolution
+
+# -----------------------------
+# PRICE FETCHER
+# -----------------------------
+
+def get_btc_price():
+    response = requests.get(BTC_PRICE_URL, timeout=10)
+    data = response.json()
+    return float(data["price"])
 
 # -----------------------------
 # ARENA GENERATOR
@@ -46,6 +57,7 @@ def generate_btc_arena(arena_number_today: int):
         "rules": rules,
         "status": "OPEN",
         "outcome": None,
+        "resolved_price": None,
         "created_at": now,
         "resolved_at": None
     }
@@ -68,23 +80,28 @@ def format_resolution(arena):
     return (
         "🧠 SYLON ARENA RESOLVED\n\n"
         f"Arena ID: {arena['arena_id']}\n\n"
-        f"Outcome: {arena['outcome']}\n\n"
+        f"Outcome: {arena['outcome']}\n"
+        f"BTC Price: {arena['resolved_price']} USD\n\n"
         f"{arena['question']}"
     )
 
 # -----------------------------
-# RESOLUTION ENGINE (V1 MOCK)
+# RESOLUTION ENGINE (REAL)
 # -----------------------------
 
 def resolve_arena(arena):
-    """
-    V1 MOCK RESOLUTION:
-    Random outcome to test flow.
-    Later this becomes real BTC price logic.
-    """
+    btc_price = get_btc_price()
+
+    if btc_price >= arena["target"]:
+        outcome = "YES"
+    else:
+        outcome = "NO"
+
     arena["status"] = "RESOLVED"
-    arena["outcome"] = random.choice(["YES", "NO"])
+    arena["outcome"] = outcome
+    arena["resolved_price"] = btc_price
     arena["resolved_at"] = datetime.now(timezone.utc)
+
     return arena
 
 # -----------------------------
@@ -97,13 +114,13 @@ if __name__ == "__main__":
         now = datetime.now(timezone.utc)
         today = now.date()
 
-        # Reset daily counter
+        # Reset daily counter at UTC midnight
         if today != current_day:
             arenas_created_today = 0
             current_day = today
             print(f"\nNew UTC Day Started: {current_day}\n")
 
-        # Create new arena
+        # Create new arena if under limit
         if arenas_created_today < DAILY_ARENA_LIMIT:
             arena = generate_btc_arena(arenas_created_today + 1)
             arenas_created_today += 1
@@ -113,7 +130,7 @@ if __name__ == "__main__":
             print(format_arena_tweet(arena))
             print("--- END ---\n")
 
-        # Check for resolutions
+        # Resolve arenas past deadline
         for arena in list(active_arenas):
             if now >= arena["deadline"]:
                 resolved = resolve_arena(arena)
@@ -123,5 +140,5 @@ if __name__ == "__main__":
                 print(format_resolution(resolved))
                 print("--- END ---\n")
 
-        # Sleep 1 hour (faster testing than 24h)
+        # Check every hour
         time.sleep(3600)
