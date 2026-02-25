@@ -20,26 +20,30 @@ current_day = datetime.now(timezone.utc).date()
 # ARENA GENERATOR
 # -----------------------------
 
-def generate_btc_arena():
+def generate_btc_arena(arena_number_today: int):
+    now = datetime.now(timezone.utc)
     target = random.choice(CRYPTO_PRICE_LEVELS)
-    deadline = datetime.now(timezone.utc) + timedelta(days=3)
+    deadline = now + timedelta(days=3)
+
+    arena_id = f"SYLON-{now.strftime('%Y%m%d')}-{arena_number_today:03d}"
 
     question = (
-        f"will btc hit {target} usd before "
-        f"{deadline.strftime('%Y-%m-%d %H:%M')} utc?"
+        f"Will BTC hit {target} USD before "
+        f"{deadline.strftime('%Y-%m-%d %H:%M')} UTC?"
     )
 
     rules = (
-        "resolution rule: YES if btc last traded price on binance "
-        "reaches or exceeds target before deadline."
+        "Resolution Rule: YES if BTC last traded price on Binance "
+        "reaches or exceeds the target before the deadline."
     )
 
     return {
+        "arena_id": arena_id,
         "question": question,
         "deadline": deadline,
         "rules": rules,
         "type": "crypto_price",
-        "created_at": datetime.now(timezone.utc)
+        "created_at": now
     }
 
 # -----------------------------
@@ -49,9 +53,10 @@ def generate_btc_arena():
 def format_arena_tweet(arena):
     tweet = (
         "🧠 SYLON PREDICTION ARENA\n\n"
+        f"Arena ID: {arena['arena_id']}\n\n"
         f"{arena['question']}\n\n"
-        f"deadline: {arena['deadline'].strftime('%Y-%m-%d %H:%M')} utc\n\n"
-        "reply YES or NO 👇\n\n"
+        f"Deadline: {arena['deadline'].strftime('%Y-%m-%d %H:%M')} UTC\n\n"
+        "Reply YES or NO 👇\n\n"
         f"{arena['rules']}"
     )
     return tweet
@@ -66,14 +71,14 @@ if __name__ == "__main__":
         now = datetime.now(timezone.utc)
         today = now.date()
 
-        # reset daily counter
+        # Reset daily counter at UTC midnight
         if today != current_day:
             arenas_created_today = 0
             current_day = today
-            print(f"\nnew utc day started: {current_day}\n")
+            print(f"\nNew UTC Day Started: {current_day}\n")
 
         if arenas_created_today < DAILY_ARENA_LIMIT:
-            arena = generate_btc_arena()
+            arena = generate_btc_arena(arenas_created_today + 1)
             tweet_text = format_arena_tweet(arena)
 
             arenas_created_today += 1
@@ -81,9 +86,8 @@ if __name__ == "__main__":
             print("\n--- READY TO POST ON X ---")
             print(tweet_text)
             print("--- END ---\n")
-
         else:
-            print("daily arena limit reached")
+            print("Daily Arena Limit Reached.")
 
-        # wait 24 hours
+        # Wait 24 hours
         time.sleep(86400)
