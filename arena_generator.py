@@ -8,8 +8,10 @@ from datetime import datetime, timedelta, timezone
 # -----------------------------
 
 DAILY_ARENA_LIMIT = 3
-CRYPTO_PRICE_LEVELS = [88000, 90000, 92000, 95000]
 BTC_PRICE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
+
+HIT_LEVELS = [88000, 90000, 92000, 95000]
+FLOOR_LEVELS = [82000, 85000, 88000]
 
 # -----------------------------
 # STATE (in-memory v1)
@@ -17,7 +19,7 @@ BTC_PRICE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
 
 arenas_created_today = 0
 current_day = datetime.now(timezone.utc).date()
-active_arenas = []  # arenas waiting for resolution
+active_arenas = []
 
 # -----------------------------
 # PRICE FETCHER
@@ -29,32 +31,44 @@ def get_btc_price():
     return float(data["price"])
 
 # -----------------------------
-# ARENA GENERATOR
+# ARENA GENERATORS
 # -----------------------------
 
-def generate_btc_arena(arena_number_today: int):
+def generate_hit_target_arena(arena_number_today: int):
     now = datetime.now(timezone.utc)
-    target = random.choice(CRYPTO_PRICE_LEVELS)
+    target = random.choice(HIT_LEVELS)
     deadline = now + timedelta(days=3)
 
     arena_id = f"SYLON-{now.strftime('%Y%m%d')}-{arena_number_today:03d}"
 
-    question = (
-        f"Will BTC hit {target} USD before "
-        f"{deadline.strftime('%Y-%m-%d %H:%M')} UTC?"
-    )
+    return {
+        "arena_id": arena_id,
+        "type": "HIT_TARGET",
+        "question": f"Will BTC hit {target} USD before {deadline.strftime('%Y-%m-%d %H:%M')} UTC?",
+        "target": target,
+        "deadline": deadline,
+        "rules": "YES if BTC price on Binance reaches or exceeds target before deadline.",
+        "status": "OPEN",
+        "outcome": None,
+        "resolved_price": None,
+        "created_at": now,
+        "resolved_at": None
+    }
 
-    rules = (
-        "Resolution Rule: YES if BTC last traded price on Binance "
-        "reaches or exceeds the target before the deadline."
-    )
+def generate_stay_above_arena(arena_number_today: int):
+    now = datetime.now(timezone.utc)
+    floor = random.choice(FLOOR_LEVELS)
+    deadline = now + timedelta(days=2)
+
+    arena_id = f"SYLON-{now.strftime('%Y%m%d')}-{arena_number_today:03d}"
 
     return {
         "arena_id": arena_id,
-        "question": question,
-        "target": target,
+        "type": "STAY_ABOVE",
+        "question": f"Will BTC stay above {floor} USD until {deadline.strftime('%Y-%m-%d %H:%M')} UTC?",
+        "floor": floor,
         "deadline": deadline,
-        "rules": rules,
+        "rules": "YES if BTC price on Binance is still above floor at deadline.",
         "status": "OPEN",
         "outcome": None,
         "resolved_price": None,
@@ -63,17 +77,17 @@ def generate_btc_arena(arena_number_today: int):
     }
 
 # -----------------------------
-# FORMATTERS (MANUAL MODE)
+# FORMATTERS
 # -----------------------------
 
-def format_arena_tweet(arena):
+def format_arena(arena):
     return (
         "🧠 SYLON PREDICTION ARENA\n\n"
         f"Arena ID: {arena['arena_id']}\n\n"
         f"{arena['question']}\n\n"
         f"Deadline: {arena['deadline'].strftime('%Y-%m-%d %H:%M')} UTC\n\n"
         "Reply YES or NO 👇\n\n"
-        f"{arena['rules']}"
+        f"Resolution Rule: {arena['rules']}"
     )
 
 def format_resolution(arena):
@@ -86,20 +100,21 @@ def format_resolution(arena):
     )
 
 # -----------------------------
-# RESOLUTION ENGINE (REAL)
+# RESOLUTION ENGINE
 # -----------------------------
 
 def resolve_arena(arena):
-    btc_price = get_btc_price()
+    price = get_btc_price()
 
-    if btc_price >= arena["target"]:
-        outcome = "YES"
-    else:
-        outcome = "NO"
+    if arena["type"] == "HIT_TARGET":
+        outcome = "YES" if price >= arena["target"] else "NO"
+
+    elif arena["type"] == "STAY_ABOVE":
+        outcome = "YES" if price >= arena["floor"] else "NO"
 
     arena["status"] = "RESOLVED"
     arena["outcome"] = outcome
-    arena["resolved_price"] = btc_price
+    arena["resolved_price"] = price
     arena["resolved_at"] = datetime.now(timezone.utc)
 
     return arena
@@ -114,23 +129,27 @@ if __name__ == "__main__":
         now = datetime.now(timezone.utc)
         today = now.date()
 
-        # Reset daily counter at UTC midnight
         if today != current_day:
             arenas_created_today = 0
             current_day = today
             print(f"\nNew UTC Day Started: {current_day}\n")
 
-        # Create new arena if under limit
         if arenas_created_today < DAILY_ARENA_LIMIT:
-            arena = generate_btc_arena(arenas_created_today + 1)
+            arena_number = arenas_created_today + 1
+
+            # Alternate arena types
+            if arena_number % 2 == 1:
+                arena = generate_hit_target_arena(arena_number)
+            else:
+                arena = generate_stay_above_arena(arena_number)
+
             arenas_created_today += 1
             active_arenas.append(arena)
 
             print("\n--- READY TO POST ON X ---")
-            print(format_arena_tweet(arena))
+            print(format_arena(arena))
             print("--- END ---\n")
 
-        # Resolve arenas past deadline
         for arena in list(active_arenas):
             if now >= arena["deadline"]:
                 resolved = resolve_arena(arena)
@@ -140,5 +159,4 @@ if __name__ == "__main__":
                 print(format_resolution(resolved))
                 print("--- END ---\n")
 
-        # Check every hour
         time.sleep(3600)
